@@ -23,6 +23,7 @@ void use_ref( Schema, Express, FILES * );
  ** and what the relationship is between this organization and the
  ** organization of the schemas in the input Express
  ******************************************************************/
+/* TODO:  Defined Types based solely on Simple Types e.g. STRING, should be output first */
 
 void SCOPEPrint( Scope scope, FILES * files, Schema schema ) {
     Linked_List list = SCOPEget_entities_superclass_order( scope );
