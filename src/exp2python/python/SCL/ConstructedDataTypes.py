@@ -31,7 +31,7 @@
 
 import sys
 from enum import Enum
-import BaseType
+from . import BaseType
 
 class ENUMERATION(Enum):
     """
@@ -66,7 +66,7 @@ class SELECT(object):
     """
     def __init__(self,*kargs,**args):
         # first defining the scope
-        if args.has_key('scope'):
+        if 'scope' in args:
             self._scope = args['scope']
         else:
             self._scope = None
