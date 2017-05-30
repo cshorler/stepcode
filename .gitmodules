@@ -1,0 +1,3 @@
+[submodule "src/auxlibs/argparse"]
+	path = src/auxlibs/argparse
+	url = https://github.com/cofyc/argparse.git
