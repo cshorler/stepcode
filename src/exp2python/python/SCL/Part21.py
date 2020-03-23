@@ -206,8 +206,8 @@ class Lexer(object):
     # Punctuation
     literals = '()=;,*$'
 
-    t_ANY_ignore  = ' \t'
-            
+    t_ANY_ignore  = ' \t\r'
+
 
 ####################################################################################################
 # Simple Model
@@ -272,7 +272,7 @@ class Parser(object):
 
         if 'debug' in kwargs:
             result = self.parser.parse(lexer=self.lexer, debug=logger,
-                                       ** dict((k, v) for k, v in kwargs.iteritems() if k != 'debug'))
+                                       ** dict((k, v) for k, v in kwargs.items() if k != 'debug'))
         else:
             result = self.parser.parse(lexer=self.lexer, **kwargs)
         return result
@@ -323,9 +323,8 @@ class Parser(object):
         p[0] = SimpleEntity(p[1], *p[3])
 
     def p_entity_instance_error(self, p):
-        """simple_entity_instance  : error '=' simple_record ';'
-           complex_entity_instance : error '=' subsuper_record ';'"""
-        pass
+        """entity_instance  : check_entity_instance_name '=' error ';'"""
+        logger.error('resyncing parser, check input between lineno %d and %d', p.lineno(2), p.lineno(4))
 
     def p_complex_entity_instance(self, p):
         """complex_entity_instance : check_entity_instance_name '=' subsuper_record ';'"""
@@ -335,23 +334,32 @@ class Parser(object):
         """subsuper_record : '(' simple_record_list ')'"""
         p[0] = [TypedParameter(*x) for x in p[2]]
 
+    def p_data_section_list_init(self, p):
+        """data_section_list : data_section"""
+        p[0] = [p[1],]
+        
     def p_data_section_list(self, p):
-        """data_section_list : data_section_list data_section
-                             | data_section"""
-        try: p[0] = p[1] + [p[2],]
-        except IndexError: p[0] = [p[1],]
+        """data_section_list : data_section_list data_section"""
+        p[0] = p[1]
+        p[0].append(p[2])
 
+    def p_header_entity_list_init(self, p):
+        """header_entity_list : header_entity"""
+        p[0] = [p[1],]
+        
     def p_header_entity_list(self, p):
-        """header_entity_list : header_entity_list header_entity
-                              | header_entity"""
-        try: p[0] = p[1] + [p[2],]
-        except IndexError: p[0] = [p[1],]
+        """header_entity_list : header_entity_list header_entity"""
+        p[0] = p[1]
+        p[0].append(p[2])
 
+    def p_parameter_list_init(self, p):
+        """parameter_list : parameter"""
+        p[0] = [p[1],]
+        
     def p_parameter_list(self, p):
-        """parameter_list : parameter_list ',' parameter
-                          | parameter"""
-        try: p[0] = p[1] + [p[3],]
-        except IndexError: p[0] = [p[1],]
+        """parameter_list : parameter_list ',' parameter"""
+        p[0] = p[1]
+        p[0].append(p[3])
 
     def p_keyword(self, p):
         """keyword : USER_DEFINED_KEYWORD
@@ -396,11 +404,14 @@ class Parser(object):
         """data_section : data_start entity_instance_list ENDSEC""" 
         p[0] = Section(p[2])
 
+    def p_entity_instance_list_init(self, p):
+        """entity_instance_list : entity_instance"""
+        p[0] = [p[1],]
+        
     def p_entity_instance_list(self, p):
-        """entity_instance_list : entity_instance_list entity_instance
-                                | entity_instance"""
-        try: p[0] = p[1] + [p[2],]
-        except IndexError: p[0] = [p[1],]
+        """entity_instance_list : entity_instance_list entity_instance"""
+        p[0] = p[1]
+        p[0].append(p[2])
 
     def p_entity_instance_list_empty(self, p):
         """entity_instance_list : empty"""
@@ -420,18 +431,40 @@ class Parser(object):
         """simple_record : keyword '(' parameter_list ')'"""
         p[0] = (p[1], p[3])
 
+    def p_simple_record_list_init(self, p):
+        """simple_record_list : simple_record"""
+        p[0] = [p[1],]
+        
     def p_simple_record_list(self, p):
-        """simple_record_list : simple_record_list simple_record
-                              | simple_record"""
-        try: p[0] = p[1] + [p[2],]
-        except IndexError: p[0] = [p[1],]
+        """simple_record_list : simple_record_list simple_record"""
+        p[0] = p[1]
+        p[0].append(p[2])
    
     def p_empty(self, p):
         """empty :"""
         pass
 
-def test_debug():
-    import os.path
+def debug_lexer():
+    import codecs
+    from os.path import normpath, expanduser
+    
+    logging.basicConfig()
+    logger.setLevel(logging.DEBUG)
+    
+    lexer = Lexer(debug=True)
+    
+    p = normpath(expanduser('~/projects/src/stepcode/data/ap209/ATS7-out.stp'))
+    with codecs.open(p, 'r', encoding='iso-8859-1') as f:
+        s = f.read()
+        lexer.input(s)
+        while True:
+            tok = lexer.token()
+            if not tok: break
+            print(tok)
+            
+def debug_parser():
+    import codecs
+    from os.path import normpath, expanduser
 
     logging.basicConfig()
     logger.setLevel(logging.DEBUG)
@@ -440,8 +473,8 @@ def test_debug():
     parser.reset()
     
     logger.info("***** parser debug *****")
-    p = os.path.expanduser('~/projects/src/stepcode/data/ap214e3/s1-c5-214/s1-c5-214.stp')
-    with open(p, 'rU') as f:
+    p = normpath(expanduser('~/projects/src/stepcode/data/ap214e3/s1-c5-214/s1-c5-214.stp'))
+    with codecs.open(p, 'r', encoding='iso-8859-1') as f:
         s = f.read()
         try:
             parser.parse(s, debug=1)
@@ -451,7 +484,8 @@ def test_debug():
     logger.info("***** finished *****")
 
 def test():
-    import os, os.path, itertools, codecs
+    import os, codecs
+    from os.path import normpath, expanduser
     
     logging.basicConfig()
     logger.setLevel(logging.INFO)
@@ -462,14 +496,14 @@ def test():
     def parse_check(p):
         logger.info("processing {0}".format(p))
         parser.reset()
-        with open(p, 'rU') as f:
-            iso_wrapper = codecs.EncodedFile(f, 'iso-8859-1')
-            s = iso_wrapper.read()
+        with codecs.open(p, 'r', encoding='iso-8859-1') as f:
+            s = f.read()
             parser.parse(s)
 
     logger.info("***** standard test *****")
-    for d, _, files in os.walk(os.path.expanduser('~/projects/src/stepcode')):
-        for f in itertools.ifilter(lambda x: x.endswith('.stp'), files):
+    stepcode_dir = normpath(os.path.expanduser('~/projects/src/stepcode'))
+    for d, _, files in os.walk(stepcode_dir):
+        for f in filter(lambda x: x.endswith('.stp'), files):
             p = os.path.join(d, f)
             try:
                 parse_check(p)
@@ -487,4 +521,6 @@ def test():
     logger.info("***** finished *****")
 
 if __name__ == '__main__':
+    #debug_lexer()
+    #debug_parser()
     test()
