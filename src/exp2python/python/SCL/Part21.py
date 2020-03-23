@@ -98,10 +98,7 @@ class Lexer(object):
         self.lexer.begin('slurp')
         
     def token(self):
-        try:
-            return next(self.lexer)
-        except StopIteration:
-            return None
+        return self.lexer.token()
 
     def activate_schema(self, schema_name):
         if schema_name in self.schema_dict:
