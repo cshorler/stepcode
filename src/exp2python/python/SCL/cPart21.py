@@ -441,14 +441,13 @@ def debug_lexer():
     lexer = Lexer(debug=True)
     
     p = normpath(expanduser('~/projects/src/stepcode/data/ap214e3/s1-c5-214/s1-c5-214.stp'))
-    #p = normpath(expanduser('~/projects/src/stepcode/data/ap209/ATS7-out.stp'))
     with codecs.open(p, 'r', encoding='iso-8859-1') as f:
         s = f.read()
         lexer.input(s)
         while True:
             tok = lexer.token()
             if not tok: break
-            print(tok)
+            logger.debug(tok)
 
 def debug_parser():
     import codecs
@@ -464,46 +463,10 @@ def debug_parser():
     p = normpath(expanduser('~/projects/src/stepcode/data/ap214e3/s1-c5-214/s1-c5-214.stp'))
     with codecs.open(p, 'r', encoding='iso-8859-1') as f:
         s = f.read()
-        try:
-            parser.parse(s, debug=1)
-        except SystemExit:
-            pass
+        parser.parse(s, debug=1)
         
     logger.info("***** finished *****")
     
-def test2():
-    import os, os.path
-    
-    logging.basicConfig()
-    logger.setLevel(logging.INFO)
-
-    #lexer = lex.lex(optimize=1)
-    #parser = yacc.yacc(optimize=1)
-    lexer = lex.lex()
-    parser = yacc.yacc()
-
-    def parse_check(p):
-        logger.info("processing {0}".format(p))
-        with open(p, 'r', encoding='iso-8859-1') as f:
-            s = f.read()
-            lexer.input(s)
-            lexer.lvl = 0
-            parser.writer_cur = tempdb()
-            parser.parse(lexer=lexer)
-
-    logger.info("***** standard test *****")
-    compat_list = []
-    for d, _, files in os.walk(os.path.expanduser('~/projects/src/stepcode')):
-        for f in filter(lambda x: x.endswith('.stp') or x.endswith('.p21'), files):
-            p = os.path.join(d, f)
-            try:
-                parse_check(p)
-            except LexError:
-                logger.exception('Lexer issue, adding {0} to compatibility test list'.format(os.path.basename(p)))
-                compat_list.append(p)
-
-    logger.info("***** finished *****")
-
 def test():
     import os, codecs
     from os.path import normpath, expanduser

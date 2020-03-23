@@ -473,10 +473,7 @@ def debug_parser():
     p = normpath(expanduser('~/projects/src/stepcode/data/ap214e3/s1-c5-214/s1-c5-214.stp'))
     with codecs.open(p, 'r', encoding='iso-8859-1') as f:
         s = f.read()
-        try:
-            parser.parse(s, debug=1)
-        except SystemExit:
-            pass
+        parser.parse(s, debug=1)
         
     logger.info("***** finished *****")
 
