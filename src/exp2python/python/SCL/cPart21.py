@@ -279,7 +279,7 @@ class Parser(object):
         
     def initdb(self, tempdb, db_path=None):
         if tempdb and not db_path:
-            tm = datetime.datetime.utcnow().isoformat(timespec='seconds')
+            tm = datetime.datetime.utcnow().isoformat(timespec='seconds').replace(':','-')
             db_path = os.path.join(tempfile.mkdtemp(), tm + '_test.db')
         elif not db_path:
             db_path = ":memory:"
@@ -476,7 +476,7 @@ def debug_parser():
         
     # test reverse lookup
     logger.info('***** testing xrefs *****')
-    tm = datetime.datetime.utcnow().isoformat(timespec='seconds')
+    tm = datetime.datetime.utcnow().isoformat(timespec='seconds').replace(':', '-')
     db_path = os.path.join(tempfile.mkdtemp(), tm + '_xref_test.db')
     
     parser = Parser()
