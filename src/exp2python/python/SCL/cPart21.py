@@ -93,7 +93,6 @@ class Lexer(object):
         self.base_tokens = list(base_tokens)
         self.schema_dict = {}
         self.active_schema = {}
-        self.input_length = 0
         self.header_limit = header_limit
         self.lexer = lex.lex(module=self, debug=debug, debuglog=logger, optimize=optimize,
                              errorlog=logger)
@@ -109,7 +108,6 @@ class Lexer(object):
 
     def input(self, s):
         self.lexer.input(s)
-        self.input_length += len(s)
 
     def reset(self):
         self.lexer.lineno = 1
