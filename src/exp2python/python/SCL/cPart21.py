@@ -12,7 +12,20 @@ logger = logging.getLogger(__name__)
 # assemble catchall regexp
 p21_real = r'(?:[+-]*[0-9][0-9]*\.[0-9]*(?:E[+-]*[0-9][0-9]*)?)'
 p21_integer = r'(?:[+-]*[0-9][0-9]*)'
-p21_string = r"(?:'(?:[][!\"*$%&.#+,\-()?/:;<=>@{}|^`~0-9a-zA-Z_\\ ]|'')*')"
+p21_string = r"""(?x:'
+    (?:
+         # basic string
+         [][!"*$%&.#+,\-()?/:;<=>@{}|^`~0-9a-zA-Z_ ]|''|\\\\|
+         # \P\A, \P\B, ... --> iso8859-1, iso8859-2,... applicable to following \S\c directives
+         \\P[A-I]\\|
+         # page control directive \S\c
+         \\S\\[][!"'*$%&.#+,\-()?/:;<=>@{}|^`~0-9a-zA-Z_\\ ]|
+         # hex string encodings
+         \\X2\\(?:[0-9A-F]{4})+\\X0\\|\\X4\\(?:[0-9A-F]{8})+\\X0\\|
+         # hex byte encoding
+         \\X\\[0-9A-F]{2}
+    )*
+')"""
 p21_binary = r'(?:"[0-3][0-9A-F]*")'
 p21_enumeration = r'(?:\.[A-Z_][A-Z0-9_]*\.)'
 p21_keyword = r'(?:!|)[A-Za-z_][0-9A-Za-z_]*'
@@ -268,6 +281,7 @@ class Parser(object):
         return result
 
     def reset(self, tempdb=None, db_path=None):
+        self.lexer.reset()
         self.initdb(tempdb, db_path)
 
     def closedb(self):
