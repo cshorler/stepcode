@@ -415,7 +415,7 @@ class Parser(object):
         """simple_entity_instance : EID '=' KEYWORD raw_data ';'"""
         eid = p[1]
         tmpl = "INSERT INTO data_table VALUES (?,?,?,?,?,?)"
-        self.db_writer.execute(tmpl, (p[1], p[3], p[4], p.lineno(1), 'S', self.sid))
+        self.db_writer.execute(tmpl, (p[1], p[3], p[4][1:-1], p.lineno(1), 'S', self.sid))
         tmpl = "INSERT INTO data_xref(id_from, id_to, id_group) VALUES (?, ?, ?)"
         xrefs = [(rid, eid, n) for n, x in _mkgroups(p[4]) for rid in x]
         self.db_writer.executemany(tmpl, xrefs)
