@@ -117,23 +117,16 @@ struct P21String {
   char zSpace[100];        /* Initial static space */
 };
 
-#define P21_EMPTY           0x01       /* optional attribute not provided : '$' */
-#define P21_DERIVED         0x02       /* derived attribute not provided  : '*' */
-#define P21_ENUMERATION     0x04       /* (also) includes boolean and logical values */
-#define P21_INTEGER         0x08       
-#define P21_REAL            0x11
-#define P21_STRING          0x12
-#define P21_BINARY          0x14
-#define P21_EID             0x18       /* entity_instance_name */
-#define P21_LIST            0x20
-#define P21_RECORD          0x40       /* simple_record */
-
-#define REC_N_MAX UINT16_MAX
-#define REC_N_ENCODE(nNode, nBytes) (((nNode) & UINT16_MAX) | \
-                                     ((nBytes) << UINT16_WIDTH & ~UINT16_MAX))
-#define REC_N_ENCODE_BYTES(nBytes)  (((nBytes) << UINT16_WIDTH & ~UINT16_MAX))
-#define REC_N_BYTES(n) (((n) >> UINT16_WIDTH) & UINT16_MAX)
-#define REC_N_NODES(n) ((n) & UINT16_MAX)
+#define P21_EMPTY           0x1       /* optional attribute not provided : '$' */
+#define P21_DERIVED         0x2       /* derived attribute not provided  : '*' */
+#define P21_ENUMERATION     0x3       /* (also) includes boolean and logical values */
+#define P21_INTEGER         0x4       
+#define P21_REAL            0x5
+#define P21_STRING          0x6
+#define P21_BINARY          0x7
+#define P21_EID             0x8       /* entity_instance_name */
+#define P21_LIST            0x9
+#define P21_RECORD          0xA       /* simple_record */
 
 #define P21_SUBTYPE         80      /* Ascii for "P" */
 
@@ -142,6 +135,7 @@ struct P21String {
 ** Names of the various P21 types:
 */
 static const char * const p21Type[] = {
+  "",
   "empty", "derived", "enumeration", "integer", "real",
   "string", "binary", "eid", "list", "record"
 };
@@ -162,6 +156,7 @@ static const char * const p21Type[] = {
 struct P21Node {
   u8 eType;              /* One of the P21_ type values */
   u8 jnFlags;            /* P21Node flags */
+  u16 n_kw;              /* store the KEYWORD length */
   u32 n;                 /* Bytes of content, or number of sub-nodes */
   union {
     const char *zJContent; /* Content for INT, REAL, and STRING */
@@ -189,12 +184,8 @@ struct P21Parse {
 
 /*
 ** Maximum nesting depth of P21 for this implementation.
-**
-** This limit is needed to avoid a stack overflow in the recursive
-** descent parser.  A depth of 2000 is far deeper than any sane P21
-** should go.
 */
-#define P21_MAX_DEPTH  2000
+#define P21_MAX_DEPTH  20
 
 /**************************************************************************
 ** Utility routines for dealing with P21String objects
@@ -413,8 +404,7 @@ static void p21Result(P21String *p){
 ** next peer value.
 */
 static u32 p21NodeSize(P21Node *pNode){
-  u8 typ = pNode->eType;
-  return typ < P21_LIST ? 1 : (typ == P21_RECORD ? REC_N_NODES(pNode->n) + 1 : pNode->n + 1);
+  return pNode->eType < P21_LIST ? 1 : pNode->n + 1;
 }
 
 /*
@@ -509,10 +499,10 @@ static void p21RenderNode(
     }
     case P21_RECORD: {
       u32 j = 1;
-      p21AppendRaw(pOut, pNode->u.zJContent, REC_N_BYTES(pNode->n));
+      p21AppendRaw(pOut, pNode->u.zJContent, pNode->n_kw);
       p21AppendChar(pOut, '(');
       for(;;){
-        while( j<= REC_N_NODES(pNode->n) ){
+        while( j<= pNode->n ){
           if( (pNode[j].jnFlags & PNODE_REMOVE)==0 ){
             p21AppendSeparator(pOut);
             p21RenderNode(&pNode[j], pOut, aReplace);
@@ -803,25 +793,23 @@ static int p21Is4Hex(const char *z){
 }
 
 /*
-** Parse a single P21 value which begins at pParse->zP21[i].  Return the
+** Parse P21 value which begins at pParse->zP21[i].  Return the
 ** index of the first character past the end of the value parsed.
 **
-** Return negative for a syntax error.  Special cases:  return -3 if the first
-** non-whitespace character is ')'.
+** Return negative for a syntax error.
 */
 static int p21ParseValue(P21Parse *pParse, u32 i) {
+    static int cxtStack[P21_MAX_DEPTH];
     const unsigned char *sp, *cur, *mrk, *tok, *end;
     /*!stags:re2c format = 'const unsigned char *@@;'; */
-    int iThis, x;
+    int *piThis, x;
+    u32 n;
     P21Node *pNode;
-    u32 j;
-    cur = tok = &pParse->zP21[i];
-
-loop:
-    tok = cur;
     
-    /*!re2c
+    sp = cur = tok = &pParse->zP21[i];
+    piThis = cxtStack + pParse->iDepth;
     
+/*!re2c
     re2c:yyfill:enable = 0;
     re2c:flags:tags = 1;
     re2c:define:YYCTYPE = 'unsigned char';
@@ -841,112 +829,229 @@ loop:
     BINARY = '"' [0-3] [0-9A-F]* '"' ;
     ENUMERATION = "." [A-Z_] [A-Z0-9_]* "." ;
     EID = "#" [0-9]+ ;
+ */
 
-    KEYWORD @end WS* "(" WS* {
-        iThis = p21ParseAddNode(pParse, P21_RECORD, REC_N_ENCODE_BYTES(end - tok), tok);
-        if( iThis<0 ) return -1;
-        i += (cur - tok);
-        for (;;) {
-            if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
-            x = p21ParseValue(pParse, i);
-            pParse->iDepth--;
-            if (x > 0) {
-                i = x;
-                continue;
-            } else {
-                if (x == -3 && pParse->nNode==(u32)iThis+1) return i + 1;
-                else if (x == -3 || x == 0) break;
-                return -1;
-            }
-        }
-        pParse->aNode[iThis].n = REC_N_ENCODE(pParse->nNode - (u32)iThis - 1, end - tok);
-        return i + 1;        
-    }
+start:
     
-    "(" WS* {
-        iThis = p21ParseAddNode(pParse, P21_LIST, 0, 0);
-        if( iThis<0 ) return -1;
-        i += (cur - tok);
-        for (;;) {
-            if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
-            x = p21ParseValue(pParse, i);
-            pParse->iDepth--;
-            if (x > 0) {
-                i = x;
-                continue;
-            } else {
-                if (x == -3 && pParse->nNode==(u32)iThis+1) return i + 1;
-                else if (x == -3 || x == 0) break;
-                return -1;
-            }            
-        }
-        pParse->aNode[iThis].n = pParse->nNode - (u32)iThis - 1;
-        return i + 1;
-    }
-    
-    REAL @end WS* {
-        p21ParseAddNode(pParse, P21_REAL, end - tok, tok);
-        return i + (cur - tok);
-    }
-    
-    INTEGER @end WS* {
-        p21ParseAddNode(pParse, P21_INTEGER, end - tok, tok);
-        return i + (cur - tok);
-    }
-    
-    STRING @end WS* {
-        p21ParseAddNode(pParse, P21_STRING, end - tok, tok);
-        return i + (cur - tok);
-    }
-    
-    BINARY @end WS* {
-        p21ParseAddNode(pParse, P21_BINARY, end - tok, tok);
-        return i + (cur - tok);
-    }
-    
-    ENUMERATION @end WS* {
-        p21ParseAddNode(pParse, P21_ENUMERATION, end - tok, tok);
-        return i + (cur - tok);
-    }
-    
-    EID @end WS* {
-        p21ParseAddNode(pParse, P21_EID, end - tok, tok);
-        return i + (cur - tok);
-    }
-    
-    "$" WS* {
-        p21ParseAddNode(pParse, P21_EMPTY, 1, tok);
-        return i + (cur - tok);
-    }
-    
-    "*" WS* {
-        p21ParseAddNode(pParse, P21_DERIVED, 1, tok);
-        return i + (cur - tok);
-    }
-    
-    "," WS* {
-        return i + 1;
-    }
-    
+    tok = cur;    
+/*!re2c
     WS+ {
-        return i + (cur - tok);
+        goto start;
     }
+    "(" {
+        /* (complex_entity_instance) parameter_list */
+        *piThis = p21ParseAddNode(pParse, P21_LIST, 0, 0);
+        if (*piThis < 0) return -1;
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto keywords;
+    }
+    "" {
+        /* (simple_entity_instance) parameter_list */
+        *piThis = p21ParseAddNode(pParse, P21_RECORD, 0, 0);
+        if (*piThis < 0) return -1;
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto params1;
+    }
+ */
 
+keywords:
+    tok = cur;    
+
+/*!re2c
+    WS+ {
+        goto keywords;
+    }
+    KEYWORD @end WS* "(" {
+        *piThis = p21ParseAddNode(pParse, P21_RECORD, 0, tok);
+        if (*piThis < 0) return -1;
+        pParse->aNode[*piThis].n_kw = (u16)(end - tok);
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto params2;
+    }
     ")" {
-        return -3;
+        piThis = cxtStack + --pParse->iDepth;
+        pNode = pParse->aNode + *piThis;
+        assert(pNode->eType == P21_LIST);
+        
+        pNode->n = pParse->nNode - (u32)*piThis - 1;
+        goto eol;
     }
-    
+    "" {
+        /* fix-up and revert to P21_RECORD */
+        pNode = pParse->aNode + *(piThis - 1);
+        pNode->eType = P21_RECORD;
+        assert(pParse->iDepth == 1);
+        goto params1;
+    }
+ */
+
+params1:
+    tok = cur;    
+
+/*!re2c
+    WS+ {
+        goto params1;
+    }
+    KEYWORD @end WS* "(" {
+        *piThis = p21ParseAddNode(pParse, P21_RECORD, 0, tok);
+        if (*piThis < 0) return -1;
+        pParse->aNode[*piThis].n_kw = (u16)(end - tok);
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto params1;
+    }
+    "(" {
+        *piThis = p21ParseAddNode(pParse, P21_LIST, 0, 0);
+        if (*piThis < 0) return -1;
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto params1;
+    }
+    "," {
+        goto params1;
+    }
+    REAL {
+        p21ParseAddNode(pParse, P21_REAL, cur - tok, tok);
+        goto params1;
+    }
+    INTEGER {
+        p21ParseAddNode(pParse, P21_INTEGER, cur - tok, tok);
+        goto params1;
+    }
+    STRING {
+        p21ParseAddNode(pParse, P21_STRING, cur - tok, tok);
+        goto params1;
+    }
+    BINARY {
+        p21ParseAddNode(pParse, P21_BINARY, cur - tok, tok);
+        goto params1;
+    }
+    ENUMERATION {
+        p21ParseAddNode(pParse, P21_ENUMERATION, cur - tok, tok);
+        goto params1;
+    }
+    EID {
+        p21ParseAddNode(pParse, P21_EID, cur - tok, tok);
+        goto params1;
+    }
+    "$" {
+        p21ParseAddNode(pParse, P21_EMPTY, cur - tok, tok);
+        goto params1;
+    }
+    "*" {
+        p21ParseAddNode(pParse, P21_DERIVED, cur - tok, tok);
+        goto params1;
+    }
+    ")" {
+        piThis = cxtStack + --pParse->iDepth;
+        pNode = pParse->aNode + *piThis;
+        pNode->n = pParse->nNode - (u32)*piThis - 1;
+        goto params1;
+    }
+    "" {
+        if (pParse->iDepth) --pParse->iDepth;
+        piThis = cxtStack + pParse->iDepth;
+        pNode = pParse->aNode + *piThis;
+        assert(pNode->eType == P21_RECORD);
+        pNode->n = pParse->nNode - (u32)*piThis - 1;
+        goto eol;
+    }
+ */
+
+params2:
+    tok = cur;    
+
+/*!re2c
+    WS+ {
+        goto params2;
+    }
+    KEYWORD @end WS* "(" {
+        *piThis = p21ParseAddNode(pParse, P21_RECORD, 0, tok);
+        if (*piThis < 0) return -1;
+        pParse->aNode[*piThis].n_kw = (u16)(end - tok);
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto params2;
+    }
+    "(" {
+        *piThis = p21ParseAddNode(pParse, P21_LIST, 0, 0);
+        if (*piThis < 0) return -1;
+        
+        if( ++pParse->iDepth > P21_MAX_DEPTH ) return -1;
+        piThis = cxtStack + pParse->iDepth;
+        goto params2;
+    }
+    "," {
+        goto params2;
+    }
+    REAL {
+        p21ParseAddNode(pParse, P21_REAL, cur - tok, tok);
+        goto params2;
+    }
+    INTEGER {
+        p21ParseAddNode(pParse, P21_INTEGER, cur - tok, tok);
+        goto params2;
+    }
+    STRING {
+        p21ParseAddNode(pParse, P21_STRING, cur - tok, tok);
+        goto params2;
+    }
+    BINARY {
+        p21ParseAddNode(pParse, P21_BINARY, cur - tok, tok);
+        goto params2;
+    }
+    ENUMERATION {
+        p21ParseAddNode(pParse, P21_ENUMERATION, cur - tok, tok);
+        goto params2;
+    }
+    EID {
+        p21ParseAddNode(pParse, P21_EID, cur - tok, tok);
+        goto params2;
+    }
+    "$" {
+        p21ParseAddNode(pParse, P21_EMPTY, cur - tok, tok);
+        goto params2;
+    }
+    "*" {
+        p21ParseAddNode(pParse, P21_DERIVED, cur - tok, tok);
+        goto params2;
+    }
+    ")" {
+        piThis = cxtStack + --pParse->iDepth;
+        pNode = pParse->aNode + *piThis;
+        pNode->n = pParse->nNode - (u32)*piThis - 1;
+        if (pParse->iDepth > 1) {
+            goto params2;
+        } else {
+            goto keywords;
+        }
+    }
+    /* continue to next block for error handling */
+ */
+
+eol:
+    tok = cur;    
+
+/*!re2c
     [\x00] {
-        return 0;
+        return cur - sp;
     }
-    
     * {
         return -1;
     }
-        
-    */
-    
+ */
+
 }
+
 
 /*
 ** Parse a complete P21 string.  Return 0 on success or non-zero if there
@@ -968,8 +1073,6 @@ static int p21Parse(
   if( pParse->oom ) i = -1;
   if( i>0 ){
     assert( pParse->iDepth==0 );
-    while( safe_isspace(zP21[i]) ) i++;
-    if( zP21[i] ) i = -1;
   }
   if( i<=0 ){
     if( pCtx!=0 ){
@@ -993,16 +1096,10 @@ static void p21ParseFillInParentage(P21Parse *pParse, u32 i, u32 iParent){
   u32 j;
   pParse->aUp[i] = iParent;
   switch( pNode->eType ){
+    case P21_RECORD:
     case P21_LIST: {
       for(j=1; j<=pNode->n; j += p21NodeSize(pNode+j)){
         p21ParseFillInParentage(pParse, i+j, i);
-      }
-      break;
-    }
-    case P21_RECORD: {
-      for(j=1; j<=pNode->n; j += p21NodeSize(pNode+j+1)+1){
-        pParse->aUp[i+j] = i;
-        p21ParseFillInParentage(pParse, i+j+1, i);
       }
       break;
     }
@@ -1402,17 +1499,15 @@ static void p21ParseFunc(
   p21Init(&s, ctx);
   for(i=0; i<x.nNode; i++){
     const char *zType;
-    if( x.aNode[i].jnFlags & PNODE_LABEL ){
-      assert( x.aNode[i].eType==P21_STRING );
-      zType = "label";
-    }else{
-      zType = p21Type[x.aNode[i].eType];
-    }
+    zType = p21Type[x.aNode[i].eType];
     p21Printf(100, &s,"node %3u: %7s n=%-4d up=%-4d",
                i, zType, x.aNode[i].n, x.aUp[i]);
-    if( x.aNode[i].u.zJContent!=0 ){
+    if( x.aNode[i].u.zJContent!=0 && x.aNode[i].eType != P21_RECORD ){
       p21AppendRaw(&s, " ", 1);
       p21AppendRaw(&s, x.aNode[i].u.zJContent, x.aNode[i].n);
+    } else if ( x.aNode[i].u.zJContent!=0 && x.aNode[i].eType == P21_RECORD ) {
+      p21AppendRaw(&s, " ", 1);
+      p21AppendRaw(&s, x.aNode[i].u.zJContent, x.aNode[i].n_kw);        
     }
     p21AppendRaw(&s, "\n", 1);
   }
@@ -2189,13 +2284,9 @@ static int p21EachNext(sqlite3_vtab_cursor *cur){
     }
   }else{
     switch( p->eType ){
+      case P21_RECORD:
       case P21_LIST: {
         p->i += p21NodeSize(&p->sParse.aNode[p->i]);
-        p->iRowid++;
-        break;
-      }
-      case P21_RECORD: {
-        p->i += 1 + p21NodeSize(&p->sParse.aNode[p->i+1]);
         p->iRowid++;
         break;
       }
