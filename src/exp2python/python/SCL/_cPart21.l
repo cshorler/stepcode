@@ -18,7 +18,9 @@
     } while (0)
 
 /*!max:re2c*/
-#define BUFSZ 16384
+
+#define INIT_BUF_SZ 4096
+#define INIT_STACK_SZ 64
 
 /* reserved '(' ')' ';' '='
  */
@@ -158,6 +160,7 @@ typedef struct {
 
 typedef struct {
     FILE *file;
+    size_t bufsz;
     unsigned char *cur, *mrk, *ctxmrk, *lim;
     unsigned char *sp, *basemrk;
     int eof;
@@ -165,7 +168,7 @@ typedef struct {
     /* 3 lookahead +1 (for error token) */
     int nsym;
     Symbol sym[4];
-    unsigned char buf[BUFSZ+YYMAXFILL];
+    unsigned char *buf;
 } Input;
 
 typedef struct {
@@ -253,22 +256,41 @@ Symbol lpop(Input *in, uint8_t token) {
 static int fill(Input *in, size_t need)
 {
     size_t free;
+    unsigned char *newbuf;
+    
     if (in->eof) {
         return 1;
     }
     free = in->basemrk - in->buf;
     if (free < need) {
-        return 2;
+        newbuf = realloc(in->buf, 2 * in->bufsz + YYMAXFILL);
+        if (!newbuf) {
+            fprintf(stderr, "fatal - buffer memory exhausted, exiting\n");
+            return 2;
+        }
+        in->bufsz *= 2;
+        in->lim = newbuf + (in->lim - in->buf);
+        in->cur = newbuf + (in->cur - in->buf);
+        in->mrk = newbuf + (in->mrk - in->buf);
+        in->ctxmrk = newbuf + (in->ctxmrk - in->buf);
+        in->basemrk = newbuf + (in->basemrk - in->buf);
+        in->sp = newbuf + (in->sp - in->buf);
+        in->buf = newbuf;
+        
+        /* don't memmove() here! */
+        free = (in->buf + in->bufsz) - in->lim;
+    } else {
+        memmove(in->buf, in->basemrk, in->lim - in->basemrk);
+        in->lim -= free;
+        in->cur -= free;
+        in->mrk -= free;
+        in->ctxmrk -= free;
+        in->basemrk -= free;
+        in->sp -= free;
     }
-    memmove(in->buf, in->basemrk, in->lim - in->basemrk);
-    in->lim -= free;
-    in->cur -= free;
-    in->mrk -= free;
-    in->ctxmrk -= free;
-    in->basemrk -= free;
-    in->sp -= free;
+    
     in->lim += fread(in->lim, 1, free, in->file);
-    if (in->lim < in->buf + BUFSZ) {
+    if (in->lim < in->buf + in->bufsz) {
         in->eof = 1;
         memset(in->lim, 0, YYMAXFILL);
         in->lim += YYMAXFILL;
@@ -285,8 +307,12 @@ static void init(Parser *p, FILE *file)
     if (!in)
         goto err;
     memset(in, 0, sizeof *in);
+    in->bufsz = INIT_BUF_SZ;
+    in->buf = malloc(INIT_BUF_SZ + YYMAXFILL);
+    if (!in->buf)
+        goto err;
     in->file = file;
-    in->cur = in->basemrk = in->sp = in->lim = in->buf + BUFSZ;
+    in->cur = in->basemrk = in->sp = in->lim = in->buf + INIT_BUF_SZ;
     in->lineno = 1;
     fill(in, 1);
 
@@ -312,19 +338,11 @@ err:
 
 
 
-
-/* myfu compile time checks */
-#define lshift(u, n) ((u) & ~0xff ? ((uint32_t) 0UL) & (u) << 24 : (uint32_t)(u) << (n))
-#define pack(u0, u1, u2, u3) (((u0) << 24) | ((u1) << 16) | ((u2) << 8) | ((u3) << 0))
-
-/* bitfu http://graphics.stanford.edu/~seander/bithacks.html */
-#define haszero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
-#define hasvalue(x,n) (haszero((x) ^ (~0UL/255 * (n))))
-
 /* ppfu https://stackoverflow.com/a/11763277/1162349 */
 #define GET_MACRO(_1, _2, _3, _4, NAME, ...) NAME
+#define _EXPAND(x) x
 
-#define PUSH_SYMBOL(...) GET_MACRO(__VA_ARGS__, _4, _3, _PUSH_SYMBOL2, _PUSH_SYMBOL1)(__VA_ARGS__)
+#define PUSH_SYMBOL(...) _EXPAND(GET_MACRO(__VA_ARGS__, _4, _3, _PUSH_SYMBOL2, _PUSH_SYMBOL1)(__VA_ARGS__))
 #define _PUSH_SYMBOL1(token) in->sym[in->nsym++] = (Symbol){(token), 0, in->lineno, n, in->sp}
 #define _PUSH_SYMBOL2(token, vtype) in->sym[in->nsym++] = (Symbol){(token), (vtype), in->lineno, n, in->sp}
 
@@ -337,12 +355,11 @@ err:
 
 
 /* test for one in a set of 1 to 4 e.g. {t0, t1, t2, t3} */
-#define LOOKAHEAD(x, ...) GET_MACRO(__VA_ARGS__, _LOOKAHEAD4, _LOOKAHEAD3, _LOOKAHEAD2, _LOOKAHEAD1)(x, __VA_ARGS__)
-#define _LOOKAHEAD1(x, t0)             ((t0) == (x.token))
-#define _LOOKAHEAD2(x, t0, t1)         ((t0) == (x.token) || (t1) == (x.token))
-#define _LOOKAHEAD3(x, t0, t1, t2)     hasvalue(pack((t0),(t1),(t2),0U),(x.token))
-#define _LOOKAHEAD4(x, t0, t1, t2, t3) hasvalue(pack((t0),(t1),(t2),(t3)),(x.token))
-
+#define LOOKAHEAD(x, ...) _EXPAND(GET_MACRO(__VA_ARGS__, _LOOKAHEAD4, _LOOKAHEAD3, _LOOKAHEAD2, _LOOKAHEAD1)(x, __VA_ARGS__))
+#define _LOOKAHEAD1(x, t0)             ((t0) == (x).token)
+#define _LOOKAHEAD2(x, t0, t1)         ((t0) == (x).token || (t1) == (x).token)
+#define _LOOKAHEAD3(x, t0, t1, t2)     (_LOOKAHEAD2(x, t0, t1) || (t2) == (x).token)
+#define _LOOKAHEAD4(x, t0, t1, t2, t3) (_LOOKAHEAD2(x, t0, t1) || _LOOKAHEAD2(x, t2, t3))
 
 void lex_comment(Input *in) {
     size_t n;
