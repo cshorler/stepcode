@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # assemble catchall regexp
 p21_real = r'(?:[+-]*[0-9][0-9]*\.[0-9]*(?:E[+-]*[0-9][0-9]*)?)'
 p21_integer = r'(?:[+-]*[0-9][0-9]*)'
-p21_string = r"""(?x:'
+p21_string = r"""(?x)(?:'
     (?:
          # basic string
          [][!"*$%&.#+,\-()?/:;<=>@{}|^`~0-9a-zA-Z_ ]|''|\\\\|
