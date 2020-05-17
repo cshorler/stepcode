@@ -70,15 +70,15 @@ class Lexer(object):
     tokens = list(base_tokens)
     states = (('slurp', 'exclusive'),)
         
-    def __init__(self, debug=0, optimize=0, compatibility_mode=False, header_limit=4096):
+    def __init__(self, debug=False, optimize=False, compatibility_mode=False, header_limit=4096):
         self.base_tokens = list(base_tokens)
         self.schema_dict = {}
         self.active_schema = {}
         self.input_length = 0
         self.compatibility_mode = compatibility_mode
         self.header_limit = header_limit
-        self.lexer = lex.lex(module=self, debug=debug, debuglog=logger, optimize=optimize,
-                             errorlog=logger)
+        self.lexer = lex.lex(module=self, debug=debug, optimize=optimize, lextab='l21tab',
+                             debuglog=logger, errorlog=logger)
         self.reset()
 
     def __getattr__(self, name):
@@ -134,6 +134,9 @@ class Lexer(object):
             offset += 1  # also skip the \n
             t.lexer.lineno += t.value[0:offset].count('\n')
             t.lexer.skip(offset)
+    
+    def t_error(self, t):
+        raise LexError("Scanning error, invalid input", "{0}...".format(t.value[0:20]))
     
     # Comment (ignored)
     def t_COMMENT(self, t):
@@ -252,14 +255,20 @@ class TypedParameter:
 class Parser(object):
     tokens = list(base_tokens)
     
-    def __init__(self, lexer=None, debug=0, start='exchange_file'):
-        self.lexer = lexer if lexer else Lexer()
+    def __init__(self, lexer=None, debug=False, tabmodule=None, start=None, optimize=False):
+        # defaults
+        start_tabs = {'exchange_file': 'p21tab', 'extract_header': 'p21hdrtab'}
+        if start and tabmodule: start_tabs[start] = tabmodule
+        if not start: start = 'exchange_file'
+        if start not in start_tabs: raise ValueError('please pass (dedicated) tabmodule')
 
         # lexer may provide a more specialised set of tokens for use in (subclassed) parser
         try: self.tokens = lexer.tokens
         except AttributeError: pass
 
-        self.parser = yacc.yacc(module=self, debug=debug, debuglog=logger, errorlog=logger, start=start)
+        self.lexer = lexer if lexer else Lexer()
+        self.parser = yacc.yacc(debug=debug, module=self, tabmodule=start_tabs[start], start=start,
+                                optimize=optimize, debuglog=logger, errorlog=logger)
         self.reset()
     
     def parse(self, p21_data, **kwargs):
@@ -284,7 +293,6 @@ class Parser(object):
         
     def p_extract_header(self, p):
         """extract_header : check_p21_start_token header_section DATA"""
-        logger.info('extracing header only')
         p[0] = P21File(p[2], [])
         # clear input to avoid trailing context errors
         p.lexer.input('')
@@ -491,8 +499,9 @@ def test():
     
     logging.basicConfig()
     logger.setLevel(logging.INFO)
-
-    parser = Parser()
+    
+    lexer = Lexer(optimize=True)
+    parser = Parser(lexer=lexer, optimize=True)
     compat_list = []
 
     def parse_check(p):
@@ -513,8 +522,8 @@ def test():
                 logger.exception('Lexer issue, adding {0} to compatibility test list'.format(os.path.basename(p)))
                 compat_list.append(p)
 
-    lexer =  Lexer(compatibility_mode=True)
-    parser = Parser(lexer=lexer)
+    lexer =  Lexer(optimize=True, compatibility_mode=True)
+    parser = Parser(lexer=lexer, optimize=True)
     
     logger.info("***** compatibility test *****")
     for p in compat_list:
@@ -529,7 +538,8 @@ def test_header_only():
     logging.basicConfig()
     logger.setLevel(logging.INFO)
 
-    parser = Parser(start='extract_header')
+    lexer = Lexer(optimize=True)
+    parser = Parser(start='extract_header', optimize=True)
     compat_list = []
 
     def parse_check(p):
@@ -550,8 +560,8 @@ def test_header_only():
                 logger.exception('Lexer issue, adding {0} to compatibility test list'.format(os.path.basename(p)))
                 compat_list.append(p)
 
-    lexer =  Lexer(compatibility_mode=True)
-    parser = Parser(lexer=lexer, start='extract_header')
+    lexer =  Lexer(optimize=True, compatibility_mode=True)
+    parser = Parser(lexer=lexer, start='extract_header', optimize=True)
     
     logger.info("***** compatibility test *****")
     for p in compat_list:

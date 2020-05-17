@@ -124,13 +124,13 @@ class Lexer(object):
               ('raw', 'exclusive'),
               ('params', 'exclusive'))
 
-    def __init__(self, debug=0, optimize=0, header_limit=4096):
+    def __init__(self, debug=False, optimize=False, header_limit=4096):
         self.base_tokens = list(base_tokens)
         self.schema_dict = {}
         self.active_schema = {}
         self.header_limit = header_limit
-        self.lexer = lex.lex(module=self, debug=debug, debuglog=logger, optimize=optimize,
-                             errorlog=logger)
+        self.lexer = lex.lex(module=self, debug=debug, optimize=optimize, lextab='cl21tab',
+                             debuglog=logger, errorlog=logger)
         self.reset()
 
     def __getattr__(self, name):
@@ -189,7 +189,9 @@ class Lexer(object):
             raise LexError("Scanning error. try increasing lexer header_limit parameter",
                            "{0}...".format(t.value[0:20]))
             
-
+    def t_error(self, t):
+        raise LexError("Scanning error, invalid input", "{0}...".format(t.value[0:20]))
+    
     def t_ANY_COMMENT(self, t):
         r'/\*(?:.|\n)*?\*/'
         t.lexer.lineno += t.value.count('\n')
@@ -290,16 +292,19 @@ class Lexer(object):
 ####################################################################################################
 class Parser(object):
     tokens = list(base_tokens)
-    start = 'exchange_file'
     
-    def __init__(self, lexer=None, debug=0, tempdb=False):
-        self.lexer = lexer if lexer else Lexer()
+    def __init__(self, lexer=None, debug=False, tabmodule=None, start=None, optimize=False,
+                 tempdb=False):
+        # defaults
+        start_tabs = {'exchange_file': 'cp21tab', 'extract_header': 'cp21hdrtab'}
+        if start and tabmodule: start_tabs[start] = tabmodule
+        if not start: start = 'exchange_file'
+        if start not in start_tabs: raise ValueError('please pass (dedicated) tabmodule')
+
         self.tempdb = tempdb
-
-        try: self.tokens = lexer.tokens
-        except AttributeError: pass
-
-        self.parser = yacc.yacc(module=self, debug=debug, debuglog=logger, errorlog=logger)
+        self.lexer = lexer if lexer else Lexer()
+        self.parser = yacc.yacc(debug=debug, module=self, tabmodule=start_tabs[start], start=start,
+                                optimize=optimize, debuglog=logger, errorlog=logger)
     
     def parse(self, p21_data, db_path=None, **kwargs):
         #TODO: will probably need to change this function if the lexer is ever to support t_eof
@@ -551,7 +556,8 @@ def test():
     logging.basicConfig()
     logger.setLevel(logging.INFO)
 
-    parser = Parser()
+    lexer = Lexer(optimize=True)
+    parser = Parser(lexer=lexer, optimize=True)
 
     def parse_check(p):
         logger.info("processing {0}".format(p))
