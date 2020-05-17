@@ -251,15 +251,15 @@ class TypedParameter:
 ####################################################################################################
 class Parser(object):
     tokens = list(base_tokens)
-    start = 'exchange_file'
     
-    def __init__(self, lexer=None, debug=0):
+    def __init__(self, lexer=None, debug=0, start='exchange_file'):
         self.lexer = lexer if lexer else Lexer()
 
+        # lexer may provide a more specialised set of tokens for use in (subclassed) parser
         try: self.tokens = lexer.tokens
         except AttributeError: pass
 
-        self.parser = yacc.yacc(module=self, debug=debug, debuglog=logger, errorlog=logger)
+        self.parser = yacc.yacc(module=self, debug=debug, debuglog=logger, errorlog=logger, start=start)
         self.reset()
     
     def parse(self, p21_data, **kwargs):
@@ -281,6 +281,13 @@ class Parser(object):
     def p_exchange_file(self, p):
         """exchange_file : check_p21_start_token header_section data_section_list check_p21_end_token"""
         p[0] = P21File(p[2], p[3])
+        
+    def p_extract_header(self, p):
+        """extract_header : check_p21_start_token header_section DATA"""
+        logger.info('extracing header only')
+        p[0] = P21File(p[2], [])
+        # clear input to avoid trailing context errors
+        p.lexer.input('')
 
     def p_check_start_token(self, p):
         """check_p21_start_token : PART21_START"""
@@ -390,7 +397,7 @@ class Parser(object):
 
     def p_data_start(self, p):
         """data_start : DATA '(' parameter_list ')' ';'"""
-        pass
+        pass # TODO: do something with the parameters
 
     def p_data_start_empty(self, p):
         """data_start : DATA '(' ')' ';'
@@ -440,6 +447,7 @@ class Parser(object):
     def p_empty(self, p):
         """empty :"""
         pass
+
 
 def debug_lexer():
     import codecs
@@ -514,7 +522,45 @@ def test():
             
     logger.info("***** finished *****")
 
+def test_header_only():
+    import os, codecs
+    from os.path import normpath, expanduser
+
+    logging.basicConfig()
+    logger.setLevel(logging.INFO)
+
+    parser = Parser(start='extract_header')
+    compat_list = []
+
+    def parse_check(p):
+        logger.info("processing {0}".format(p))
+        parser.reset()
+        with codecs.open(p, 'r', encoding='iso-8859-1') as f:
+            s = f.read()
+            parser.parse(s)
+
+    logger.info("***** standard test *****")
+    stepcode_dir = normpath(os.path.expanduser('~/projects/src/stepcode'))
+    for d, _, files in os.walk(stepcode_dir):
+        for f in filter(lambda x: x.endswith('.stp'), files):
+            p = os.path.join(d, f)
+            try:
+                parse_check(p)
+            except LexError:
+                logger.exception('Lexer issue, adding {0} to compatibility test list'.format(os.path.basename(p)))
+                compat_list.append(p)
+
+    lexer =  Lexer(compatibility_mode=True)
+    parser = Parser(lexer=lexer, start='extract_header')
+    
+    logger.info("***** compatibility test *****")
+    for p in compat_list:
+        parse_check(p)
+            
+    logger.info("***** finished *****")
+
 if __name__ == '__main__':
     #debug_lexer()
     #debug_parser()
     test()
+    #test_header_only()
