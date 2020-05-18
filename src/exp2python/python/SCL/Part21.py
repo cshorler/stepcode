@@ -225,24 +225,24 @@ class P21Header:
         self.extra_headers = []
 
 class HeaderEntity:
-    def __init__(self, type_name, *params):
+    def __init__(self, type_name, params):
         self.type_name = type_name
-        self.params = list(params) if params else []
+        self.params = params
 
 class Section:
     def __init__(self, entities):
         self.entities = entities
 
 class SimpleEntity:
-    def __init__(self, ref, type_name, *params):
+    def __init__(self, ref, type_name, params):
         self.ref = ref
         self.type_name = type_name
-        self.params = list(params) if params else []
+        self.params = params
 
 class ComplexEntity:
-    def __init__(self, ref, *params):
+    def __init__(self, ref, params):
         self.ref = ref
-        self.params = list(params) if params else []
+        self.params = params
 
 class TypedParameter:
     def __init__(self, type_name, *params):
@@ -344,7 +344,7 @@ class Parser(object):
 
     def p_subsuper_record(self, p):
         """subsuper_record : '(' simple_record_list ')'"""
-        p[0] = [TypedParameter(*x) for x in p[2]]
+        p[0] = [SimpleEntity(None, *x) for x in p[2]]
 
     def p_data_section_list_init(self, p):
         """data_section_list : data_section"""
